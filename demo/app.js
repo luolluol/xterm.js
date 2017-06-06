@@ -2,12 +2,12 @@ var express = require('express');
 var app = express();
 var expressWs = require('express-ws')(app);
 var os = require('os');
-var pty = require('node-pty');
+var pty = require('pty.js');
 
-var terminals = {},
-    logs = {};
+var terminals = {};
 
 app.use('/build', express.static(__dirname + '/../build'));
+app.use('/addons', express.static(__dirname + '/../addons'));
 
 app.get('/', function(req, res){
   res.sendFile(__dirname + '/index.html');
@@ -22,22 +22,18 @@ app.get('/main.js', function(req, res){
 });
 
 app.post('/terminals', function (req, res) {
-  var cols = parseInt(req.query.cols),
-      rows = parseInt(req.query.rows),
+  var cols = parseInt(req.query.cols) || 130,
+      rows = parseInt(req.query.rows) || 24,
       term = pty.spawn(process.platform === 'win32' ? 'cmd.exe' : 'bash', [], {
         name: 'xterm-color',
-        cols: cols || 80,
-        rows: rows || 24,
+        cols: cols,
+        rows: rows,
         cwd: process.env.PWD,
         env: process.env
       });
 
-  console.log('Created terminal with PID: ' + term.pid);
+  console.log('Created terminal with PID: ' + term.pid + ', with cols: ' + cols + ', rows: ' + rows);
   terminals[term.pid] = term;
-  logs[term.pid] = '';
-  term.on('data', function(data) {
-    logs[term.pid] += data;
-  });
   res.send(term.pid.toString());
   res.end();
 });
@@ -56,7 +52,6 @@ app.post('/terminals/:pid/size', function (req, res) {
 app.ws('/terminals/:pid', function (ws, req) {
   var term = terminals[parseInt(req.params.pid)];
   console.log('Connected to terminal ' + term.pid);
-  ws.send(logs[term.pid]);
 
   term.on('data', function(data) {
     try {
@@ -65,15 +60,16 @@ app.ws('/terminals/:pid', function (ws, req) {
       // The WebSocket is not open, ignore
     }
   });
+
   ws.on('message', function(msg) {
     term.write(msg);
   });
   ws.on('close', function () {
-    term.kill();
+    //process.kill(term.pid, 'SIGTERM');
+	term.destroy();
     console.log('Closed terminal ' + term.pid);
     // Clean things up
     delete terminals[term.pid];
-    delete logs[term.pid];
   });
 });
 
